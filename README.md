@@ -6,7 +6,7 @@ Based on Larsen paper with unspecified implementation details added. Includes ca
 
 ## Reference
 
-Larsen, Lars Frede Søgaard, et al. "A benchmark for evaluation of control algorithms for supermarket refrigeration systems." European Control Conference (ECC). IEEE, 2007.
+Larsen, L. F. S., Izadi-Zamanabadi, R., & Wisniewski, R. (2007, July 2-5). Supermarket Refrigeration System - Benchmark for Hybrid System Control. *Proceedings of the European Control Conference 2007*, Kos, Greece. TuA03.5.
 
 ## Setup
 
@@ -40,9 +40,4 @@ ENABLE_HYSTERESIS = True     # Per-unit hysteresis bands
 LOAD_NOISE_STD = 100.0       # Load noise [J/s]
 ```
 
-## Results
-
-Automatic comparison table shows performance vs. paper baseline:
-- Clean baseline: 87-98% lower γ_switch than paper
-- Alignment features: Increase switching closer to paper values
-- All metrics: γ_con, γ_switch, γ_pow for day/night periods
+Note: not all details are present for a perfect reproduction of the figures shown in the paper. For example, the capacity quantization and unit dispatch policy (midpoint thresholds and optional lead/lag alternation), the exact switch-counting convention, the initial conditions (Psuc and case states), and the VFD min-capacity behavior are not fully specified in the paper and are therefore defined explicitly here, along with small numerical guards (anti-windup, dρ/dP floor, optional load noise).
