@@ -4,6 +4,10 @@ Implementation of the ECC'07 supermarket refrigeration benchmark from Larsen et 
 
 Based on Larsen paper with unspecified implementation details added. Includes capacity-agnostic quantizer, numerical stability guards, and baseline alignment options.
 
+## Reference
+
+Larsen, Lars Frede Søgaard, et al. "A benchmark for evaluation of control algorithms for supermarket refrigeration systems." European Control Conference (ECC). IEEE, 2007.
+
 ## Setup
 
 ```bash
@@ -42,14 +46,3 @@ Automatic comparison table shows performance vs. paper baseline:
 - Clean baseline: 87-98% lower γ_switch than paper
 - Alignment features: Increase switching closer to paper values
 - All metrics: γ_con, γ_switch, γ_pow for day/night periods
-
-## Features
-
-- Per-unit compressor switch counting
-- VFD control with configurable minimum hold
-- Lead/lag unit alternation
-- Hysteresis bands for realistic rack behavior
-- Load noise injection for valve synchronization
-- Numerical stability guards
-- Comprehensive diagnostics
-- Reproducible results with random seeding
