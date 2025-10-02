@@ -706,6 +706,395 @@ def print_diagnostics(time, comp_capacity, comp_switches, valve_states, comp_sta
     print("  " + "-" * 50)
 
 # ============================================================================
+# BAYESIAN OPTIMIZATION INTERFACE
+# ============================================================================
+
+def compute_reference_metrics(scenario='2d-2c', Kp=-75.0, tau_I=50.0, DB=0.20, seed=42):
+    """Compute reference baseline metrics for normalization
+    
+    Args:
+        scenario: '2d-2c' or '3d-3c'
+        Kp: Proportional gain (negative)
+        tau_I: Integral time constant [s]
+        DB: Dead band [bar]
+        seed: Random seed
+        
+    Returns:
+        dict with keys 'gcon_day', 'gsw_day', 'gpow_day', 'gcon_night', 'gsw_night', 'gpow_night'
+    """
+    # Run baseline simulation
+    time, T_air, P_suc, P_ref, comp_cap, power, valve_states, comp_switches, comp_states_log, n_cases = \
+        run_scenario(scenario, duration=14400, seed=seed)
+    
+    # Split day/night
+    day_mask = time < 7200
+    night_mask = time >= 7200
+    
+    # Day metrics (use P_ref=1.7 for constraint violation per paper)
+    gcon_day, gsw_day, gpow_day = calculate_performance(
+        time[day_mask], T_air[day_mask], P_suc[day_mask], 
+        comp_switches[day_mask], power[day_mask], valve_states[day_mask], 
+        P_ref=1.7
+    )
+    
+    # Night metrics (use P_ref=1.9 for constraint violation per paper)
+    gcon_night, gsw_night, gpow_night = calculate_performance(
+        time[night_mask], T_air[night_mask], P_suc[night_mask], 
+        comp_switches[night_mask], power[night_mask], valve_states[night_mask], 
+        P_ref=1.9
+    )
+    
+    return {
+        'gcon_day': gcon_day,
+        'gsw_day': gsw_day,
+        'gpow_day': gpow_day / 1000,  # Convert to kW
+        'gcon_night': gcon_night,
+        'gsw_night': gsw_night,
+        'gpow_night': gpow_night / 1000,  # Convert to kW
+    }
+
+def detect_hard_violations(time, T_air, P_suc, 
+                           T_min=1.5, T_max=5.5, P_max=2.05, 
+                           violation_duration=60.0):
+    """Detect hard constraint violations beyond soft bounds
+    
+    Args:
+        time: Time array [s]
+        T_air: Air temperature array [s, n_cases]
+        P_suc: Suction pressure array [s]
+        T_min: Hard lower bound for temperature [°C]
+        T_max: Hard upper bound for temperature [°C]
+        P_max: Hard upper bound for pressure [bar]
+        violation_duration: Minimum duration for sustained violation [s]
+        
+    Returns:
+        penalty_count: Number of distinct violations
+    """
+    dt = time[1] - time[0] if len(time) > 1 else 1.0
+    n_cases = T_air.shape[1]
+    penalty_count = 0
+    
+    # Temperature violations (per case)
+    for j in range(n_cases):
+        # Check for too cold
+        too_cold = T_air[:, j] < T_min
+        if np.any(too_cold):
+            # Count sustained violations (> violation_duration)
+            cold_duration = np.sum(too_cold) * dt
+            if cold_duration > violation_duration:
+                penalty_count += 1
+        
+        # Check for too hot
+        too_hot = T_air[:, j] > T_max
+        if np.any(too_hot):
+            hot_duration = np.sum(too_hot) * dt
+            if hot_duration > violation_duration:
+                penalty_count += 1
+    
+    # Pressure violations
+    too_high_P = P_suc > P_max
+    if np.any(too_high_P):
+        high_P_duration = np.sum(too_high_P) * dt
+        if high_P_duration > violation_duration:
+            penalty_count += 1
+    
+    return penalty_count
+
+def evaluate_bo_objective(theta, scenario='2d-2c', ref_metrics=None, 
+                          alpha=0.5, w_con=1.0, w_pow=0.3, w_sw=0.2,
+                          lambda_pen=10.0, seeds=(42,), 
+                          enable_alternation=False, enable_hysteresis=False,
+                          enable_antiwindup=False, vfd_min_hold=True,
+                          verbose=False):
+    """Bayesian Optimization objective function
+    
+    This is the main function for BO. It:
+    1. Takes PID parameters (theta)
+    2. Runs simulation(s)
+    3. Computes normalized metrics
+    4. Returns scalar loss with penalties
+    
+    Args:
+        theta: tuple/array of (Kp, tau_I, DB)
+        scenario: '2d-2c' or '3d-3c'
+        ref_metrics: Dict of reference metrics for normalization
+                     If None, will compute from default params
+        alpha: Blend weight for day/night (0.5 = equal weight)
+        w_con: Weight for constraint violation metric
+        w_pow: Weight for power metric
+        w_sw: Weight for switching metric
+        lambda_pen: Penalty multiplier for hard violations
+        seeds: Tuple of random seeds for repeated evaluations
+        enable_alternation: Lead/lag unit alternation
+        enable_hysteresis: Per-unit hysteresis
+        enable_antiwindup: PI anti-windup
+        vfd_min_hold: Keep VFD at minimum 10% when on
+        verbose: Print detailed info
+        
+    Returns:
+        loss: Scalar objective value (lower is better)
+    """
+    # Extract and clip parameters
+    Kp, tau_I, DB = theta
+    Kp = float(np.clip(Kp, -150.0, -10.0))
+    tau_I = float(np.clip(tau_I, 10.0, 200.0))
+    DB = float(np.clip(DB, 0.05, 0.35))
+    
+    if verbose:
+        print(f"\n  Evaluating: Kp={Kp:.2f}, tau_I={tau_I:.2f}, DB={DB:.3f}")
+    
+    # Compute reference metrics if not provided
+    if ref_metrics is None:
+        if verbose:
+            print("  Computing reference metrics...")
+        ref_metrics = compute_reference_metrics(scenario=scenario, seed=seeds[0])
+    
+    # Run multiple seeds and average
+    losses = []
+    for seed_idx, seed in enumerate(seeds):
+        if verbose and len(seeds) > 1:
+            print(f"    Seed {seed}...")
+        
+        # Setup system with custom parameters
+        if scenario == '2d-2c':
+            n_cases = 2
+            comp_capacities = [50.0, 50.0]
+            V_sl = 0.08
+            has_vfd = False
+        elif scenario == '3d-3c':
+            n_cases = 3
+            comp_capacities = [40.0, 30.0, 30.0]
+            V_sl = 0.095
+            has_vfd = True
+        else:
+            raise ValueError("Unknown scenario")
+        
+        # Initialize system
+        system = RefrigerationSystem(n_cases, comp_capacities, V_sl, has_vfd=has_vfd)
+        
+        # Set controller parameters (THIS IS THE KEY PART FOR BO)
+        system.controller.cp.K_p = Kp
+        system.controller.cp.tau_I = tau_I
+        system.controller.cp.DB = DB
+        system.controller.cp.enable_alternation = enable_alternation
+        system.controller.cp.enable_hysteresis = enable_hysteresis
+        system.controller.cp.enable_antiwindup = enable_antiwindup
+        system.controller.cp.vfd_min_hold = vfd_min_hold
+        
+        # Set random seed
+        np.random.seed(seed)
+        
+        # Set initial conditions per Appendix C
+        if scenario == '2d-2c':
+            system.cases[0].state = np.array([2.0, 0.0, 5.1, 0.0])
+            system.cases[1].state = np.array([2.0, 0.0, 0.0, 1.0])
+        else:
+            system.cases[0].state = np.array([2.0, 0.0, 5.1, 0.0])
+            system.cases[1].state = np.array([2.0, 0.0, 0.0, 1.0])
+            system.cases[2].state = np.array([2.0, 0.0, 2.5, 0.5])
+        system.P_suc = 1.40
+        
+        # Run simulation
+        dt = 1.0
+        duration = 14400
+        n_steps = int(duration / dt)
+        
+        time = np.zeros(n_steps)
+        T_air = np.zeros((n_steps, n_cases))
+        P_suc = np.zeros(n_steps)
+        P_ref_profile = np.zeros(n_steps)
+        power = np.zeros(n_steps)
+        valve_states = np.zeros((n_steps, n_cases))
+        comp_switches = np.zeros(n_steps)
+        
+        system.set_day_mode()
+        
+        for i in range(n_steps):
+            t = i * dt
+            time[i] = t
+            
+            if t >= 7200:
+                system.set_night_mode()
+            
+            valves, comp_on, pwr, comp_sw = system.simulate_step(dt, t)
+            
+            for j in range(n_cases):
+                T_air[i, j] = system.cases[j].state[2]
+                valve_states[i, j] = valves[j]
+            P_suc[i] = system.P_suc
+            P_ref_profile[i] = system.P_ref
+            power[i] = pwr
+            comp_switches[i] = comp_sw
+        
+        # Split day/night
+        day_mask = time < 7200
+        night_mask = time >= 7200
+        
+        # Calculate metrics
+        gcon_day, gsw_day, gpow_day = calculate_performance(
+            time[day_mask], T_air[day_mask], P_suc[day_mask],
+            comp_switches[day_mask], power[day_mask], valve_states[day_mask],
+            P_ref=1.7
+        )
+        
+        gcon_night, gsw_night, gpow_night = calculate_performance(
+            time[night_mask], T_air[night_mask], P_suc[night_mask],
+            comp_switches[night_mask], power[night_mask], valve_states[night_mask],
+            P_ref=1.9
+        )
+        
+        # Convert power to kW
+        gpow_day /= 1000
+        gpow_night /= 1000
+        
+        # Detect hard violations
+        pen_day = detect_hard_violations(time[day_mask], T_air[day_mask], P_suc[day_mask])
+        pen_night = detect_hard_violations(time[night_mask], T_air[night_mask], P_suc[night_mask])
+        total_pen = pen_day + pen_night
+        
+        # Blend day/night metrics
+        gcon = alpha * gcon_day + (1 - alpha) * gcon_night
+        gsw = alpha * gsw_day + (1 - alpha) * gsw_night
+        gpow = alpha * gpow_day + (1 - alpha) * gpow_night
+        
+        # Normalize by reference metrics
+        gcon_norm = gcon / max(ref_metrics['gcon_day'], 0.001)  # Avoid div by zero
+        gsw_norm = gsw / max(ref_metrics['gsw_day'], 0.001)
+        gpow_norm = gpow / max(ref_metrics['gpow_day'], 0.001)
+        
+        # Scalar loss
+        loss = w_con * gcon_norm + w_sw * gsw_norm + w_pow * gpow_norm + lambda_pen * total_pen
+        losses.append(float(loss))
+        
+        if verbose:
+            print(f"      gcon={gcon:.3f} (norm={gcon_norm:.3f}), "
+                  f"gsw={gsw:.6f} (norm={gsw_norm:.3f}), "
+                  f"gpow={gpow:.2f} (norm={gpow_norm:.3f}), "
+                  f"pen={total_pen}, loss={loss:.3f}")
+    
+    mean_loss = float(np.mean(losses))
+    
+    if verbose:
+        if len(losses) > 1:
+            print(f"    Mean loss: {mean_loss:.3f} (std={np.std(losses):.3f})")
+        else:
+            print(f"    Loss: {mean_loss:.3f}")
+    
+    return mean_loss
+
+def run_bo_tuning(scenario='2d-2c', n_trials=50, n_seeds=1, verbose=True):
+    """Run Bayesian Optimization to tune PID parameters using Ax
+    
+    This is a complete example showing how to use Ax for optimization.
+    
+    Args:
+        scenario: '2d-2c' or '3d-3c'
+        n_trials: Number of BO iterations
+        n_seeds: Number of random seeds per evaluation (for robustness)
+        verbose: Print progress
+        
+    Returns:
+        best_params: Dict with best Kp, tau_I, DB
+        best_loss: Best objective value found
+    """
+    try:
+        from ax.service.ax_client import AxClient
+        from ax.service.utils.instantiation import ObjectiveProperties
+    except ImportError:
+        print("ERROR: Ax is not installed. Install with: pip install ax-platform")
+        return None, None
+    
+    if verbose:
+        print("=" * 70)
+        print(f"BAYESIAN OPTIMIZATION: PID TUNING FOR {scenario.upper()}")
+        print("=" * 70)
+    
+    # Compute reference metrics once
+    if verbose:
+        print("\nComputing reference baseline metrics...")
+    ref_metrics = compute_reference_metrics(scenario=scenario, seed=42)
+    
+    if verbose:
+        print(f"  Reference day metrics: gcon={ref_metrics['gcon_day']:.3f}, "
+              f"gsw={ref_metrics['gsw_day']:.6f}, gpow={ref_metrics['gpow_day']:.2f} kW")
+    
+    # Create Ax client
+    ax_client = AxClient(verbose_logging=False)
+    
+    # Define search space
+    ax_client.create_experiment(
+        name=f"pid_tuning_{scenario}",
+        parameters=[
+            {
+                "name": "Kp",
+                "type": "range",
+                "bounds": [-150.0, -10.0],
+                "value_type": "float",
+                "log_scale": False,
+            },
+            {
+                "name": "tau_I",
+                "type": "range",
+                "bounds": [10.0, 200.0],
+                "value_type": "float",
+                "log_scale": True,  # Log scale often better for time constants
+            },
+            {
+                "name": "DB",
+                "type": "range",
+                "bounds": [0.05, 0.35],
+                "value_type": "float",
+                "log_scale": False,
+            },
+        ],
+        objectives={"loss": ObjectiveProperties(minimize=True)},
+    )
+    
+    # Generate random seeds for evaluation
+    seed_list = list(range(42, 42 + n_seeds))
+    
+    # BO loop
+    for i in range(n_trials):
+        if verbose:
+            print(f"\n[Trial {i+1}/{n_trials}]")
+        
+        # Get next parameter configuration
+        parameters, trial_index = ax_client.get_next_trial()
+        
+        # Evaluate
+        theta = (parameters["Kp"], parameters["tau_I"], parameters["DB"])
+        loss = evaluate_bo_objective(
+            theta, 
+            scenario=scenario,
+            ref_metrics=ref_metrics,
+            seeds=tuple(seed_list),
+            verbose=verbose
+        )
+        
+        # Report result
+        ax_client.complete_trial(trial_index=trial_index, raw_data={"loss": (loss, 0.0)})
+        
+        if verbose:
+            print(f"  → Loss: {loss:.3f}")
+    
+    # Get best parameters
+    best_parameters, values = ax_client.get_best_parameters()
+    best_loss = values[0]["loss"]
+    
+    if verbose:
+        print("\n" + "=" * 70)
+        print("OPTIMIZATION COMPLETE")
+        print("=" * 70)
+        print(f"\nBest parameters found:")
+        print(f"  Kp:    {best_parameters['Kp']:.3f}")
+        print(f"  tau_I: {best_parameters['tau_I']:.3f} s")
+        print(f"  DB:    {best_parameters['DB']:.3f} bar")
+        print(f"  Loss:  {best_loss:.3f}")
+        print("\n" + "=" * 70)
+    
+    return best_parameters, best_loss
+
+# ============================================================================
 # MAIN EXECUTION
 # ============================================================================
 
@@ -823,3 +1212,45 @@ if __name__ == "__main__":
     print("\n" + "=" * 70)
     print("Simulation complete!")
     print("=" * 70)
+    
+    # ========================================================================
+    # BAYESIAN OPTIMIZATION EXAMPLE
+    # ========================================================================
+    # Uncomment the section below to run Bayesian Optimization for PID tuning
+    # 
+    # print("\n\n")
+    # print("=" * 70)
+    # print("BAYESIAN OPTIMIZATION EXAMPLE")
+    # print("=" * 70)
+    # 
+    # # Example 1: Quick manual evaluation of a custom PID configuration
+    # print("\n[Example 1: Manual evaluation]")
+    # ref_metrics = compute_reference_metrics(scenario='2d-2c', seed=42)
+    # theta_test = (-100.0, 75.0, 0.15)  # Custom Kp, tau_I, DB
+    # loss = evaluate_bo_objective(theta_test, scenario='2d-2c', 
+    #                               ref_metrics=ref_metrics, 
+    #                               verbose=True)
+    # print(f"\nCustom config {theta_test} → Loss: {loss:.3f}")
+    # 
+    # # Example 2: Run full BO optimization (requires: pip install ax-platform)
+    # print("\n[Example 2: Full BO optimization]")
+    # print("Uncomment the lines below to run BO (warning: takes time!)\n")
+    # # best_params, best_loss = run_bo_tuning(
+    # #     scenario='2d-2c', 
+    # #     n_trials=30,      # Start small, increase to 50-100 for better results
+    # #     n_seeds=1,        # Use 2-3 for robustness if load noise is enabled
+    # #     verbose=True
+    # # )
+    # # 
+    # # if best_params is not None:
+    # #     # Validate best parameters found
+    # #     print("\n[Validating best parameters with full simulation...]")
+    # #     time_val, T_air_val, P_suc_val, P_ref_val, comp_cap_val, power_val, \
+    # #         valve_states_val, comp_switches_val, comp_states_log_val, n_cases_val = \
+    # #         run_scenario('2d-2c', duration=14400, seed=999)
+    # #     
+    # #     fig_opt = plot_results(time_val, T_air_val, P_suc_val, P_ref_val, 
+    # #                           comp_cap_val, power_val, n_cases_val, '2d-2c (Optimized)')
+    # #     plt.show()
+    # 
+    # print("=" * 70)

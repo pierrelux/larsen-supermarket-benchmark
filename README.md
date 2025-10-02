@@ -37,3 +37,42 @@ ENABLE_ALTERNATION = True    # Lead/lag unit rotation
 ENABLE_HYSTERESIS = True     # Per-unit hysteresis bands
 LOAD_NOISE_STD = 100.0       # Load noise [J/s]
 ```
+
+## PID Tuning with Bayesian Optimization
+
+The codebase now includes a complete Bayesian Optimization interface for automatic PID parameter tuning.
+
+### Quick Start
+
+```bash
+# Install Ax platform
+pip install ax-platform
+
+# Run BO tuning
+python tune_pid_with_bo.py
+```
+
+### Features
+
+- **Automatic parameter search**: Optimizes Kp, τ_I, and DB using Bayesian Optimization
+- **Scalar objective**: Combines γ_con (constraint violation), γ_switch (switching rate), and γ_pow (power) with configurable weights
+- **Hard constraint penalties**: Prevents unsafe solutions that violate temperature/pressure bounds
+- **Multi-seed support**: Robust optimization under stochastic load noise
+- **Both scenarios**: Works with 2d-2c and 3d-3c configurations
+
+### API Example
+
+```python
+from supermarket import evaluate_bo_objective, compute_reference_metrics, run_bo_tuning
+
+# Quick evaluation of custom PID parameters
+ref_metrics = compute_reference_metrics(scenario='2d-2c', seed=42)
+theta = (-100.0, 75.0, 0.15)  # (Kp, tau_I, DB)
+loss = evaluate_bo_objective(theta, scenario='2d-2c', ref_metrics=ref_metrics)
+
+# Full BO optimization (50 trials)
+best_params, best_loss = run_bo_tuning(scenario='2d-2c', n_trials=50)
+print(f"Optimal Kp={best_params['Kp']:.2f}, tau_I={best_params['tau_I']:.2f}, DB={best_params['DB']:.3f}")
+```
+
+See [`BO_TUNING_GUIDE.md`](BO_TUNING_GUIDE.md) for detailed documentation, configuration tips, and advanced usage.
