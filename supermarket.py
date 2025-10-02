@@ -267,7 +267,7 @@ class RefrigerationSystem:
         # Initialize components
         self.n_cases = n_cases
         self.cases = [DisplayCase(DisplayCaseParams(), i) for i in range(n_cases)]
-        self.P_suc = 1.50  # Initial suction pressure [bar]
+        self.P_suc = 1.40  # Initial suction pressure [bar] (per Appendix C)
         self.V_suc = 5.0  # Suction manifold volume [m³]
         
         comp_params = CompressorParams(V_sl=V_sl)
@@ -280,7 +280,7 @@ class RefrigerationSystem:
         # Scenario parameters (day mode initial)
         self.Q_airload = 3000.0  # J/s per display case
         self.m_ref_const = 0.2   # kg/s
-        self.P_ref = 1.50        # bar (from figure plots)
+        self.P_ref = 1.50        # bar (PI setpoint for controller)
         self.load_noise_std = 0.0  # J/s - set to ~100 to reproduce valve synchronization
         
         # Control timing (per paper Section V.A)
