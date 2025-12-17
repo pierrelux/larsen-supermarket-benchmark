@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Supermarket Refrigeration - Trajectory Optimization Control</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" rel="stylesheet"/>
+<script defer="" src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer="" src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<style>
+    :root {
+      --frost-blue: #4AA8C2;
+      --frost-light: #A8D8E8;
+      --frost-pale: #D4EDF4;
+      --ice-white: #F0F8FA;
+      --cold-purple: #6B5B95;
+      --cold-purple-light: #B8B0D0;
+      --warm-orange: #E8734A;
+      --warm-orange-light: #F4B8A6;
+      --energy-green: #45B69C;
+      --energy-green-light: #A8DFD0;
+      --steel-gray: #4A5568;
+      --steel-light: #A0AEC0;
+      --bg-main: #F7FAFB;
+      --bg-card: #FFFFFF;
+      --bg-accent: #E8F4F8;
+      --white: #ffffff;
+      --danger-red: #E53E3E;
+      --danger-light: #FEB2B2;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg-main);
+      color: var(--steel-gray);
+      line-height: 1.4;
+    }
+
+    .poster {
+      width: 100%;
+      max-width: 1800px;
+      margin: 0 auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    /* Header */
+    header {
+      background: linear-gradient(135deg, var(--frost-blue) 0%, var(--cold-purple) 100%);
+      color: var(--white);
+      border-radius: 16px;
+      padding: 22px 28px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 8px 26px rgba(74, 168, 194, 0.25);
+    }
+
+    header::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      right: -10%;
+      width: 60%;
+      height: 200%;
+      background: radial-gradient(ellipse, rgba(255,255,255,0.1) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    header::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, 
+        var(--energy-green) 0%, 
+        var(--frost-light) 33%, 
+        var(--warm-orange) 66%, 
+        var(--cold-purple-light) 100%);
+    }
+
+    .header-content {
+      display: flex;
+      align-items: flex-start;
+      gap: 24px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .brand-block { flex-shrink: 0; min-width: 170px; padding-top: 2px; }
+    .brand-wordmark { font-weight: 800; font-size: 1.55em; color: var(--white); line-height: 1; }
+    .brand-sub { margin-top: 6px; font-size: 0.78em; color: rgba(255,255,255,0.82); font-weight: 500; }
+    .brand-author { margin-top: 10px; font-size: 0.82em; color: var(--white); font-weight: 600; }
+
+    .header-text { flex: 1; }
+    h1 { font-size: 2.5em; font-weight: 700; color: var(--white); line-height: 1.1; margin-bottom: 6px; }
+    .subtitle { font-size: 0.95em; color: rgba(255,255,255,0.85); margin-bottom: 10px; }
+
+    .key-finding {
+      background: rgba(255,255,255,0.15);
+      border-left: 3px solid var(--energy-green);
+      padding: 10px 14px;
+      border-radius: 0 10px 10px 0;
+      font-size: 0.9em;
+      color: var(--white);
+      display: inline-block;
+      backdrop-filter: blur(4px);
+    }
+    .key-finding strong { color: var(--energy-green-light); }
+
+    /* Grid */
+    .content-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      flex: 1;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--bg-card);
+      border-radius: 14px;
+      padding: 14px 16px;
+      border: 1px solid rgba(160, 174, 192, 0.35);
+      box-shadow: 0 4px 12px rgba(74, 85, 104, 0.08);
+      font-size: 0.95em;
+    }
+
+    .card.span-2 { grid-column: span 2; }
+    .card.span-3 { grid-column: span 3; }
+    .card.span-4 { grid-column: span 4; }
+
+    .section-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.72em;
+      letter-spacing: 0.08em;
+      font-weight: 700;
+      text-transform: uppercase;
+      background: var(--bg-accent);
+    }
+    .section-kicker::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent, var(--frost-blue));
+    }
+
+    .card h2 {
+      font-size: 1.55em;
+      font-weight: 800;
+      color: var(--steel-gray);
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid var(--accent-light, var(--frost-pale));
+    }
+
+    .card p { margin: 0 0 8px; line-height: 1.45; }
+    .card ul { list-style: none; padding-left: 0; margin: 8px 0; }
+    .card li { padding: 3px 0 3px 16px; position: relative; }
+    .card li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 10px;
+      width: 6px;
+      height: 6px;
+      background: var(--accent, var(--frost-blue));
+      border-radius: 50%;
+    }
+
+    .accent-frost { --accent: var(--frost-blue); --accent-light: var(--frost-pale); }
+    .accent-purple { --accent: var(--cold-purple); --accent-light: var(--cold-purple-light); }
+    .accent-green { --accent: var(--energy-green); --accent-light: var(--energy-green-light); }
+    .accent-orange { --accent: var(--warm-orange); --accent-light: var(--warm-orange-light); }
+
+    /* Math blocks */
+    .math-block {
+      background: var(--bg-accent);
+      padding: 10px 14px;
+      border-radius: 6px;
+      margin: 8px 0;
+      border-left: 3px solid var(--frost-blue);
+      overflow-x: auto;
+    }
+    .math-block .katex { font-size: 1.1em; }
+    .math-label {
+      font-size: 0.72em;
+      color: var(--frost-blue);
+      font-weight: 600;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .card .katex { font-size: 1.0em; }
+
+    /* Highlight boxes */
+    .highlight-box {
+      background: linear-gradient(135deg, var(--energy-green-light) 0%, var(--white) 100%);
+      border-left: 3px solid var(--energy-green);
+      padding: 10px 12px;
+      border-radius: 0 8px 8px 0;
+      margin: 10px 0;
+      font-size: 0.9em;
+    }
+    .highlight-box.frost {
+      background: linear-gradient(135deg, var(--frost-pale) 0%, var(--white) 100%);
+      border-left-color: var(--frost-blue);
+    }
+    .highlight-box.purple {
+      background: linear-gradient(135deg, var(--cold-purple-light) 0%, var(--white) 100%);
+      border-left-color: var(--cold-purple);
+    }
+    .highlight-box.orange {
+      background: linear-gradient(135deg, var(--warm-orange-light) 0%, var(--white) 100%);
+      border-left-color: var(--warm-orange);
+    }
+
+    /* SVG diagrams */
+    .diagram-container {
+      margin: 12px 0;
+      background: linear-gradient(135deg, var(--ice-white) 0%, var(--bg-accent) 100%);
+      border-radius: 10px;
+      padding: 12px;
+      border: 1px solid var(--frost-pale);
+    }
+    .diagram-container svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    .diagram-title {
+      font-size: 0.75em;
+      font-weight: 700;
+      color: var(--frost-blue);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .diagram-caption {
+      font-size: 0.8em;
+      color: var(--steel-light);
+      margin-top: 8px;
+      line-height: 1.3;
+    }
+
+    /* Metrics */
+    .metrics-row {
+      display: flex;
+      gap: 10px;
+      margin: 10px 0;
+      flex-wrap: wrap;
+    }
+    .metric {
+      flex: 1;
+      min-width: 90px;
+      text-align: center;
+      padding: 10px 8px;
+      background: linear-gradient(135deg, var(--ice-white) 0%, var(--white) 100%);
+      border-radius: 8px;
+      border: 1px solid var(--frost-pale);
+    }
+    .metric.highlight {
+      background: linear-gradient(135deg, var(--energy-green-light) 0%, var(--white) 100%);
+      border-color: var(--energy-green);
+    }
+    .metric.frost {
+      background: linear-gradient(135deg, var(--frost-pale) 0%, var(--white) 100%);
+      border-color: var(--frost-blue);
+    }
+    .metric-value {
+      font-size: 1.35em;
+      font-weight: 700;
+      color: var(--frost-blue);
+    }
+    .metric.highlight .metric-value { color: var(--energy-green); }
+    .metric-label {
+      font-size: 0.7em;
+      color: var(--steel-light);
+      margin-top: 2px;
+      font-weight: 500;
+    }
+
+    /* Two column layout */
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    /* Footer */
+    footer {
+      margin-top: 8px;
+      padding: 14px 20px;
+      background: var(--white);
+      border-radius: 14px;
+      border: 1px solid rgba(160, 174, 192, 0.35);
+      box-shadow: 0 1px 8px rgba(74, 85, 104, 0.05);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      font-size: 0.8em;
+    }
+    .footer-brand { display: flex; align-items: center; gap: 16px; }
+    .footer-brand .logo-text { font-weight: 700; font-size: 1.1em; color: var(--frost-blue); }
+    .footer-brand .tagline { font-size: 0.75em; color: var(--steel-light); }
+    .footer-ref {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding-left: 16px;
+      border-left: 2px solid var(--frost-pale);
+      max-width: 520px;
+    }
+    .footer-ref-label { font-size: 0.7em; letter-spacing: 0.08em; text-transform: uppercase; color: var(--steel-light); font-weight: 700; }
+    .footer-ref-text { font-size: 0.85em; color: var(--steel-gray); font-weight: 500; }
+    .tech-stack { display: flex; gap: 10px; flex-wrap: wrap; }
+    .tech-item {
+      font-size: 0.75em;
+      color: var(--steel-gray);
+      padding: 3px 10px;
+      background: var(--bg-accent);
+      border-radius: 12px;
+    }
+
+    /* Print styles */
+    @media print {
+      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+      html, body { margin: 0; padding: 0; background: var(--bg-main) !important; }
+      .poster { max-width: none; padding: 20px; margin: 0; }
+    }
+    @page { size: A0 landscape; margin: 12mm; }
+</style>
+</head>
+<body>
+<div class="poster">
+
+<!-- HEADER -->
+<header>
+  <div class="header-content">
+    <div class="brand-block">
+      <div class="brand-wordmark">Mila</div>
+      <div class="brand-sub">Quebec AI Institute</div>
+      <div class="brand-author">Pierre-Luc Bacon, PLuRL Group</div>
+    </div>
+    <div class="header-text">
+      <h1>Trajectory Optimization for Supermarket Refrigeration</h1>
+      <p class="subtitle">MPC with Hysteresis Layer for Hybrid Discrete-Continuous Control</p>
+      <div class="key-finding">
+        <strong>All MPC methods outperform PID</strong> on both T<sub>air</sub> and P<sub>suc</sub> constraints. | Key insight: <strong>Hysteresis layer</strong> translates continuous optimization to discrete actuation. | Comparison of MS-SLSQP, MPPI, and RTI-MPC.
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="content-grid">
+
+<!-- ROW 1: Motivation + Physical System -->
+<div class="card span-2 accent-frost">
+  <div class="section-kicker">1 - Motivation</div>
+  <h2>The Coordination Problem</h2>
+  
+  <p style="margin-bottom:10px;"><strong>Commercial refrigeration</strong> accounts for ~40% of a supermarket's electricity consumption. Multiple display cases share a compressor rack, creating a coupled control problem.</p>
+  
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin:10px 0;">
+    <div style="background:var(--ice-white); border-radius:6px; padding:10px; border-left:4px solid var(--warm-orange);">
+      <div style="font-weight:700; color:var(--warm-orange); font-size:0.9em; margin-bottom:6px;">CURRENT PRACTICE</div>
+      <ul style="font-size:0.8em; margin:0; padding-left:16px;">
+        <li>Each case runs independent hysteresis control</li>
+        <li>Valves synchronize: all open/close together</li>
+        <li>Pressure swings force compressor cycling</li>
+        <li>Energy waste from start/stop losses</li>
+        <li>No anticipation of thermal dynamics</li>
+      </ul>
+    </div>
+    <div style="background:var(--bg-accent); border-radius:6px; padding:10px; border-left:4px solid var(--energy-green);">
+      <div style="font-weight:700; color:var(--energy-green); font-size:0.9em; margin-bottom:6px;">MPC ADVANTAGES</div>
+      <ul style="font-size:0.8em; margin:0; padding-left:16px;">
+        <li>Coordinate valves to avoid synchronization</li>
+        <li>Predict thermal inertia over horizon</li>
+        <li>Enforce temperature bounds directly</li>
+        <li>Smooth compressor operation</li>
+        <li>Optimize energy vs. constraint trade-off</li>
+      </ul>
+    </div>
+  </div>
+  
+  <div class="highlight-box frost" style="margin:8px 0 0 0; padding:10px;">
+    <strong>Setting:</strong> 2 display cases, 2 compressors (each 50% capacity), 4-hour simulation with day/night profile. Constraints: T<sub>air</sub> ∈ [2, 5]°C, P<sub>suc</sub> ≤ 1.7 bar.
+  </div>
+</div>
+
+<div class="card span-2 accent-purple">
+  <div class="section-kicker">2 - Physical System</div>
+  <h2>Vapor Compression Cycle</h2>
+  
+  <p>Refrigerant (R134a) evaporates inside display case coils, absorbing heat from the air. Vapor flows to a shared manifold, is compressed, and heat is rejected to the environment.</p>
+  
+  <div class="diagram-container" style="margin:10px 0; padding:12px;">
+    <div class="diagram-title">System Architecture: Display Cases + Compressor Rack</div>
+    <svg viewBox="0 0 760 200" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="coldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" style="stop-color:#A8D8E8"/>
+          <stop offset="100%" style="stop-color:#4AA8C2"/>
+        </linearGradient>
+        <linearGradient id="warmGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" style="stop-color:#F4B8A6"/>
+          <stop offset="100%" style="stop-color:#E8734A"/>
+        </linearGradient>
+        <marker id="arrowBlue" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto">
+          <polygon points="0 0, 6 2.5, 0 5" fill="#4AA8C2"/>
+        </marker>
+        <marker id="arrowOrange" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto">
+          <polygon points="0 0, 6 2.5, 0 5" fill="#E8734A"/>
+        </marker>
+      </defs>
+      
+      <!-- Display Case 1 -->
+      <g transform="translate(30, 20)">
+        <rect x="0" y="0" width="130" height="100" rx="8" fill="url(#coldGrad)" stroke="#4AA8C2" stroke-width="2"/>
+        <text x="65" y="20" text-anchor="middle" font-size="10" fill="white" font-weight="700">DISPLAY CASE 1</text>
+        
+        <!-- Goods -->
+        <rect x="15" y="30" width="40" height="25" rx="3" fill="#45B69C" opacity="0.8"/>
+        <text x="35" y="47" text-anchor="middle" font-size="8" fill="white" font-weight="600">Goods</text>
+        
+        <!-- Air -->
+        <rect x="70" y="30" width="45" height="25" rx="3" fill="#A8DFD0"/>
+        <text x="92" y="47" text-anchor="middle" font-size="8" fill="#4A5568" font-weight="600">T<tspan dy="2" font-size="6">air</tspan></text>
+        
+        <!-- Evaporator coil -->
+        <path d="M 20 70 Q 35 62 50 70 Q 65 78 80 70 Q 95 62 110 70" fill="none" stroke="#6B5B95" stroke-width="3"/>
+        <text x="65" y="88" text-anchor="middle" font-size="7" fill="#6B5B95" font-weight="600">Evaporator</text>
+        
+        <!-- Valve symbol -->
+        <circle cx="10" cy="70" r="6" fill="white" stroke="#E8734A" stroke-width="2"/>
+        <text x="10" y="73" text-anchor="middle" font-size="7" fill="#E8734A" font-weight="700">V</text>
+      </g>
+      
+      <!-- Display Case 2 -->
+      <g transform="translate(180, 20)">
+        <rect x="0" y="0" width="130" height="100" rx="8" fill="url(#coldGrad)" stroke="#4AA8C2" stroke-width="2"/>
+        <text x="65" y="20" text-anchor="middle" font-size="10" fill="white" font-weight="700">DISPLAY CASE 2</text>
+        
+        <!-- Goods -->
+        <rect x="15" y="30" width="40" height="25" rx="3" fill="#45B69C" opacity="0.8"/>
+        <text x="35" y="47" text-anchor="middle" font-size="8" fill="white" font-weight="600">Goods</text>
+        
+        <!-- Air -->
+        <rect x="70" y="30" width="45" height="25" rx="3" fill="#A8DFD0"/>
+        <text x="92" y="47" text-anchor="middle" font-size="8" fill="#4A5568" font-weight="600">T<tspan dy="2" font-size="6">air</tspan></text>
+        
+        <!-- Evaporator coil -->
+        <path d="M 20 70 Q 35 62 50 70 Q 65 78 80 70 Q 95 62 110 70" fill="none" stroke="#6B5B95" stroke-width="3"/>
+        <text x="65" y="88" text-anchor="middle" font-size="7" fill="#6B5B95" font-weight="600">Evaporator</text>
+        
+        <!-- Valve symbol -->
+        <circle cx="10" cy="70" r="6" fill="white" stroke="#E8734A" stroke-width="2"/>
+        <text x="10" y="73" text-anchor="middle" font-size="7" fill="#E8734A" font-weight="700">V</text>
+      </g>
+      
+      <!-- Suction Manifold -->
+      <rect x="340" y="50" width="120" height="40" rx="6" fill="#D4EDF4" stroke="#4AA8C2" stroke-width="2"/>
+      <text x="400" y="65" text-anchor="middle" font-size="9" fill="#4AA8C2" font-weight="700">SUCTION</text>
+      <text x="400" y="78" text-anchor="middle" font-size="9" fill="#4AA8C2" font-weight="700">MANIFOLD</text>
+      <text x="400" y="105" text-anchor="middle" font-size="9" fill="#4A5568" font-weight="600">P<tspan dy="2" font-size="6">suc</tspan></text>
+      
+      <!-- Vapor flow arrows to manifold -->
+      <line x1="160" y1="90" x2="160" y2="130" stroke="#4AA8C2" stroke-width="2"/>
+      <line x1="160" y1="130" x2="335" y2="130" stroke="#4AA8C2" stroke-width="2"/>
+      <line x1="335" y1="130" x2="335" y2="90" stroke="#4AA8C2" stroke-width="2" marker-end="url(#arrowBlue)"/>
+      
+      <line x1="310" y1="90" x2="310" y2="110" stroke="#4AA8C2" stroke-width="2"/>
+      <line x1="310" y1="110" x2="350" y2="110" stroke="#4AA8C2" stroke-width="2"/>
+      <line x1="350" y1="110" x2="350" y2="90" stroke="#4AA8C2" stroke-width="2" marker-end="url(#arrowBlue)"/>
+      
+      <text x="240" y="145" text-anchor="middle" font-size="8" fill="#4AA8C2" font-style="italic">Vapor (low P)</text>
+      
+      <!-- Compressor Rack -->
+      <g transform="translate(490, 25)">
+        <rect x="0" y="0" width="130" height="95" rx="8" fill="url(#warmGrad)" stroke="#E8734A" stroke-width="2"/>
+        <text x="65" y="18" text-anchor="middle" font-size="10" fill="white" font-weight="700">COMPRESSOR RACK</text>
+        
+        <!-- Compressor 1 -->
+        <rect x="15" y="28" width="45" height="25" rx="4" fill="white" fill-opacity="0.9"/>
+        <text x="37" y="45" text-anchor="middle" font-size="8" fill="#E8734A" font-weight="600">C1: 50%</text>
+        
+        <!-- Compressor 2 -->
+        <rect x="70" y="28" width="45" height="25" rx="4" fill="white" fill-opacity="0.9"/>
+        <text x="92" y="45" text-anchor="middle" font-size="8" fill="#E8734A" font-weight="600">C2: 50%</text>
+        
+        <text x="65" y="72" text-anchor="middle" font-size="8" fill="white" font-weight="600">Total: 0-100%</text>
+        <text x="65" y="88" text-anchor="middle" font-size="7" fill="white" opacity="0.9">Compress vapor → reject heat</text>
+      </g>
+      
+      <!-- Flow from manifold to compressor -->
+      <line x1="460" y1="70" x2="485" y2="70" stroke="#4AA8C2" stroke-width="2" marker-end="url(#arrowBlue)"/>
+      
+      <!-- Liquid return (simplified) -->
+      <line x1="555" y1="130" x2="555" y2="160" stroke="#E8734A" stroke-width="2"/>
+      <line x1="555" y1="160" x2="95" y2="160" stroke="#E8734A" stroke-width="2"/>
+      <line x1="95" y1="160" x2="95" y2="105" stroke="#E8734A" stroke-width="2" marker-end="url(#arrowOrange)"/>
+      <text x="320" y="175" text-anchor="middle" font-size="8" fill="#E8734A" font-style="italic">Liquid (high P)</text>
+      
+      <!-- Heat loads annotation - aligned with compressor rack -->
+      <g transform="translate(660, 25)">
+        <rect x="0" y="0" width="90" height="95" rx="4" fill="#F7FAFB" stroke="#A0AEC0"/>
+        <text x="45" y="15" text-anchor="middle" font-size="8" fill="#4A5568" font-weight="700">DISTURBANCES</text>
+        <text x="10" y="35" font-size="7" fill="#4A5568">Day: 3000 W/case</text>
+        <text x="10" y="50" font-size="7" fill="#4A5568">Night: 1000 W/case</text>
+        <text x="10" y="70" font-size="7" fill="#A0AEC0" font-style="italic">+ external inflow</text>
+        <text x="10" y="88" font-size="7" fill="#A0AEC0" font-style="italic">  m<tspan dy="1" font-size="5">ref</tspan><tspan dy="-1"> = 0.1-0.2</tspan></text>
+      </g>
+    </svg>
+    <div class="diagram-caption"><strong>Counterflow architecture:</strong> Liquid refrigerant enters display cases, evaporates (absorbing heat), flows as vapor to the suction manifold. Compressors raise pressure for heat rejection. Valve timing and compressor capacity determine system efficiency.</div>
+  </div>
+</div>
+
+<!-- ROW 2: Dynamics + State Space -->
+<div class="card span-2 accent-green">
+  <div class="section-kicker">3 - System Dynamics</div>
+  <h2>Coupled Thermal-Pressure ODEs</h2>
+  
+  <p style="margin-bottom:8px;">Each display case has <strong>three thermal masses</strong> (goods, air, wall) coupled through heat transfer, plus <strong>refrigerant mass</strong> with switched dynamics.</p>
+  
+  <div class="diagram-container" style="padding:10px;">
+    <div class="diagram-title">Display Case Thermal Network</div>
+    <svg viewBox="0 0 480 130" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="heatArrow" markerWidth="5" markerHeight="4" refX="4" refY="2" orient="auto">
+          <polygon points="0 0, 5 2, 0 4" fill="#6B5B95"/>
+        </marker>
+      </defs>
+      
+      <!-- Goods -->
+      <rect x="30" y="35" width="70" height="50" rx="6" fill="#45B69C" stroke="#3a9a84" stroke-width="2"/>
+      <text x="65" y="55" text-anchor="middle" font-size="10" fill="white" font-weight="700">GOODS</text>
+      <text x="65" y="72" text-anchor="middle" font-size="9" fill="white">T<tspan dy="2" font-size="6">goods</tspan></text>
+      
+      <!-- Heat flow: Goods → Air -->
+      <line x1="105" y1="60" x2="140" y2="60" stroke="#6B5B95" stroke-width="2" marker-end="url(#heatArrow)"/>
+      <text x="122" y="52" text-anchor="middle" font-size="7" fill="#6B5B95" font-weight="600">Q<tspan dy="1" font-size="5">ga</tspan></text>
+      
+      <!-- Air -->
+      <rect x="145" y="35" width="70" height="50" rx="6" fill="#A8DFD0" stroke="#45B69C" stroke-width="2"/>
+      <text x="180" y="55" text-anchor="middle" font-size="10" fill="#4A5568" font-weight="700">AIR</text>
+      <text x="180" y="72" text-anchor="middle" font-size="9" fill="#4A5568">T<tspan dy="2" font-size="6">air</tspan></text>
+      
+      <!-- External heat load - label moved to side to avoid arrow overlap -->
+      <line x1="180" y1="5" x2="180" y2="30" stroke="#E8734A" stroke-width="2" marker-end="url(#heatArrow)"/>
+      <text x="200" y="12" text-anchor="start" font-size="7" fill="#E8734A" font-weight="600">Q<tspan dy="1" font-size="5">load</tspan></text>
+      
+      <!-- Heat flow: Air → Wall -->
+      <line x1="220" y1="60" x2="255" y2="60" stroke="#6B5B95" stroke-width="2" marker-end="url(#heatArrow)"/>
+      <text x="237" y="52" text-anchor="middle" font-size="7" fill="#6B5B95" font-weight="600">Q<tspan dy="1" font-size="5">aw</tspan></text>
+      
+      <!-- Wall -->
+      <rect x="260" y="35" width="70" height="50" rx="6" fill="#B8B0D0" stroke="#6B5B95" stroke-width="2"/>
+      <text x="295" y="55" text-anchor="middle" font-size="10" fill="white" font-weight="700">WALL</text>
+      <text x="295" y="72" text-anchor="middle" font-size="9" fill="white">T<tspan dy="2" font-size="6">wall</tspan></text>
+      
+      <!-- Heat flow: Wall → Evaporator -->
+      <line x1="335" y1="60" x2="370" y2="60" stroke="#6B5B95" stroke-width="2" marker-end="url(#heatArrow)"/>
+      <text x="352" y="52" text-anchor="middle" font-size="7" fill="#6B5B95" font-weight="600">Q<tspan dy="1" font-size="5">e</tspan></text>
+      
+      <!-- Evaporator -->
+      <rect x="375" y="30" width="90" height="60" rx="6" fill="#4AA8C2" stroke="#3d8fa3" stroke-width="2"/>
+      <text x="420" y="48" text-anchor="middle" font-size="10" fill="white" font-weight="700">EVAP</text>
+      <text x="420" y="63" text-anchor="middle" font-size="8" fill="white">M<tspan dy="2" font-size="6">ref</tspan><tspan dy="-2">, T</tspan><tspan dy="2" font-size="6">e</tspan><tspan dy="-2">(P</tspan><tspan dy="2" font-size="6">suc</tspan><tspan dy="-2">)</tspan></text>
+      
+      <!-- Valve control - outside box with arrow entering -->
+      <defs>
+        <marker id="valveArrow" markerWidth="5" markerHeight="4" refX="4" refY="2" orient="auto">
+          <polygon points="0 0, 5 2, 0 4" fill="#E8734A"/>
+        </marker>
+      </defs>
+      <text x="420" y="105" text-anchor="middle" font-size="7" fill="#E8734A" font-weight="600">Valve control</text>
+      <line x1="420" y1="100" x2="420" y2="93" stroke="#E8734A" stroke-width="1.5" marker-end="url(#valveArrow)"/>
+      
+      <!-- Equations below -->
+      <g transform="translate(30, 105)">
+        <text x="0" y="12" font-size="8" fill="#4A5568">
+          Dynamics: $\dot{T}_{\text{air}} = \frac{Q_{\text{ga}} + Q_{\text{load}} - Q_{\text{aw}}}{M_{\text{air}} C_p}$, 
+          $Q_e = UA(M_{\text{ref}}) \cdot (T_{\text{wall}} - T_e)$
+        </text>
+      </g>
+    </svg>
+  </div>
+  
+  <div class="math-block" style="margin:8px 0; padding:8px; border-left-color: var(--cold-purple);">
+    <div class="math-label" style="color: var(--cold-purple);">Switched Refrigerant Dynamics</div>
+    $$\dot{M}_{\text{ref}} = \begin{cases} (M_{\max} - M_{\text{ref}})/\tau_{\text{fill}} & \text{valve} = 1 \text{ (fill)} \\ -Q_e / h_{\text{fg}}(P_{\text{suc}}) & \text{valve} = 0, M_{\text{ref}} > 0 \text{ (evap)} \\ 0 & \text{else} \end{cases}$$
+  </div>
+  
+  <div class="highlight-box" style="margin:8px 0 0 0; padding:8px;">
+    <strong>Coupling via suction manifold:</strong> All display cases share $P_{\text{suc}}$. The manifold pressure evolves as: 
+    $\dot{P}_{\text{suc}} \propto (\text{vapor in from cases}) - (\text{vapor out via compressors})$.
+  </div>
+</div>
+
+<div class="card span-2 accent-orange">
+  <div class="section-kicker">4 - State & Control</div>
+  <h2>Hybrid System Structure</h2>
+  
+  <p style="margin-bottom:8px;">The system is <strong>hybrid</strong>: continuous temperature/pressure dynamics with discrete valve switching.</p>
+  
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin:10px 0;">
+    <!-- State vector -->
+    <div style="background:var(--ice-white); border-radius:8px; padding:12px; border:2px solid var(--frost-blue);">
+      <div style="font-weight:700; color:var(--frost-blue); font-size:0.95em; margin-bottom:8px;">STATE VECTOR (9 dim)</div>
+      
+      <div class="math-block" style="margin:6px 0; padding:8px; font-size:0.9em;">
+        $$x = [T_{\text{g},1}, T_{\text{g},2}, T_{\text{w},1}, T_{\text{w},2}, T_{\text{air},1}, T_{\text{air},2}, M_{\text{ref},1}, M_{\text{ref},2}, P_{\text{suc}}]^\top$$
+      </div>
+      
+      <ul style="font-size:0.8em; margin:6px 0; padding-left:16px;">
+        <li><strong>Per case (×2):</strong> goods temp, wall temp, air temp, refrigerant mass</li>
+        <li><strong>Shared:</strong> suction manifold pressure</li>
+      </ul>
+    </div>
+    
+    <!-- Control vector -->
+    <div style="background:var(--warm-orange-light); border-radius:8px; padding:12px; border:2px solid var(--warm-orange);">
+      <div style="font-weight:700; color:var(--warm-orange); font-size:0.95em; margin-bottom:8px;">CONTROL VECTOR (3 dim)</div>
+      
+      <div class="math-block" style="margin:6px 0; padding:8px; font-size:0.9em; border-left-color: var(--warm-orange);">
+        $$u = [\text{valve}_1, \text{valve}_2, \text{comp}]^\top$$
+      </div>
+      
+      <ul style="font-size:0.8em; margin:6px 0; padding-left:16px;">
+        <li><strong>Valves:</strong> $\text{valve}_i \in \{0, 1\}$ (binary)</li>
+        <li><strong>Compressor:</strong> $\text{comp} \in [0, 100]\%$ (continuous, quantized to 0/50/100)</li>
+      </ul>
+    </div>
+  </div>
+  
+  <div class="metrics-row" style="margin-top:8px;">
+    <div class="metric frost">
+      <div class="metric-value">2-5°C</div>
+      <div class="metric-label">T<sub>air</sub> constraint</div>
+    </div>
+    <div class="metric frost">
+      <div class="metric-value">≤1.7 bar</div>
+      <div class="metric-label">P<sub>suc</sub> limit</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value">10 s</div>
+      <div class="metric-label">Discretization Δt</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value">3 min</div>
+      <div class="metric-label">MPC horizon</div>
+    </div>
+  </div>
+</div>
+
+<!-- ROW 3: Problem Formulation + Optimization Details -->
+<div class="card span-2 accent-purple">
+  <div class="section-kicker">5 - Problem Formulation</div>
+  <h2>Nonlinear Program (Multiple Shooting)</h2>
+  
+  <p style="margin-bottom:12px;"><strong>Multiple shooting</strong> treats both states and controls as decision variables, enabling direct enforcement of path constraints. Solved every 3 minutes via receding horizon.</p>
+  
+  <!-- Decision Variables -->
+  <div style="background:var(--cold-purple-light); background:linear-gradient(135deg, rgba(107,91,149,0.15) 0%, rgba(107,91,149,0.08) 100%); border-radius:8px; padding:14px; margin-bottom:12px; border-left:4px solid var(--cold-purple);">
+    <div style="font-weight:700; color:var(--cold-purple); font-size:0.9em; margin-bottom:8px;">DECISION VARIABLES</div>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+      <div>
+        <div style="font-size:0.85em; color:var(--steel-gray); margin-bottom:4px;">Controls (applied to system)</div>
+        $$u_{0:N-1} = \{u_0, u_1, \ldots, u_{N-1}\}$$
+        <div style="font-size:0.75em; color:var(--steel-light);">where $u_k = [\text{valve}_1, \text{valve}_2, \text{comp}]^\top$</div>
+      </div>
+      <div>
+        <div style="font-size:0.85em; color:var(--steel-gray); margin-bottom:4px;">States (for constraint enforcement)</div>
+        $$x_{1:N} = \{x_1, x_2, \ldots, x_N\}$$
+        <div style="font-size:0.75em; color:var(--steel-light);">where $x_k \in \mathbb{R}^9$ (temps, masses, pressure)</div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Main Optimization Problem -->
+  <div style="background:var(--ice-white); border-radius:8px; padding:14px; border:2px solid var(--cold-purple);">
+    <div style="text-align:center; margin-bottom:10px;">
+      <span style="font-weight:700; color:var(--cold-purple); font-size:1.1em;">Minimize</span>
+    </div>
+    <div style="text-align:center; font-size:1.05em;">
+      $$J = \sum_{k=0}^{N-1} \underbrace{\frac{1}{1000} \dot{W}_{\text{comp}}(x_k, u_k)}_{\text{power cost}} + \underbrace{0.01 \cdot \|\Delta u_k\|_1}_{\text{switching penalty}}$$
+    </div>
+    
+    <div style="text-align:center; margin:12px 0 8px 0;">
+      <span style="font-weight:700; color:var(--cold-purple); font-size:1.1em;">Subject to</span>
+    </div>
+    
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+      <div style="background:white; padding:10px; border-radius:6px; border-left:3px solid var(--frost-blue);">
+        <div style="font-size:0.8em; color:var(--frost-blue); font-weight:600; margin-bottom:4px;">Dynamics (equality)</div>
+        $$x_{k+1} = f(x_k, u_k, d_k)$$
+        <div style="font-size:0.7em; color:var(--steel-light);">Euler integration, $\Delta t = 10$s</div>
+      </div>
+      <div style="background:white; padding:10px; border-radius:6px; border-left:3px solid var(--energy-green);">
+        <div style="font-size:0.8em; color:var(--energy-green); font-weight:600; margin-bottom:4px;">State bounds (inequality)</div>
+        $$T_{\text{air},i} \in [2, 5]°\text{C}$$
+        $$P_{\text{suc}} \in [0.8, 1.7] \text{ bar}$$
+      </div>
+    </div>
+    
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
+      <div style="background:white; padding:10px; border-radius:6px; border-left:3px solid var(--warm-orange);">
+        <div style="font-size:0.8em; color:var(--warm-orange); font-weight:600; margin-bottom:4px;">Control bounds</div>
+        $$\text{valve}_i \in [0, 1], \quad \text{comp} \in [0, 100]$$
+      </div>
+      <div style="background:white; padding:10px; border-radius:6px; border-left:3px solid var(--steel-gray);">
+        <div style="font-size:0.8em; color:var(--steel-gray); font-weight:600; margin-bottom:4px;">Initial condition</div>
+        $$x_0 = x_{\text{current}} \text{ (measured)}$$
+      </div>
+    </div>
+  </div>
+  
+  <div style="margin-top:10px; font-size:0.8em; color:var(--steel-gray); background:rgba(107,91,149,0.08); padding:8px; border-radius:6px;">
+    <strong>Key insight:</strong> States $x_{1:N}$ as decision variables enables box constraints on temperatures and pressure. Dynamics become equality constraints enforced by SLSQP. Total: $N \times 12$ variables, $N \times 9$ equality constraints.
+  </div>
+</div>
+
+<div class="card span-2 accent-frost">
+  <div class="section-kicker">6 - Implementation</div>
+  <h2>Three MPC Approaches + Hysteresis Layer</h2>
+  
+  <p style="margin-bottom:8px;">We implemented three different trajectory optimization methods, all sharing a common <strong>hysteresis layer</strong> for discrete actuation.</p>
+  
+  <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin:10px 0;">
+    <!-- MS-SLSQP -->
+    <div style="background:var(--cold-purple-light); border-radius:8px; padding:10px; border-left:4px solid var(--cold-purple);">
+      <div style="font-weight:700; color:var(--cold-purple); font-size:0.85em; margin-bottom:6px;">MS-SLSQP</div>
+      <ul style="font-size:0.75em; margin:0; padding-left:14px;">
+        <li>Multiple shooting NLP</li>
+        <li>JAX gradients</li>
+        <li>SciPy SLSQP solver</li>
+      </ul>
+    </div>
+    
+    <!-- MPPI -->
+    <div style="background:var(--warm-orange-light); border-radius:8px; padding:10px; border-left:4px solid var(--warm-orange);">
+      <div style="font-weight:700; color:var(--warm-orange); font-size:0.85em; margin-bottom:6px;">MPPI</div>
+      <ul style="font-size:0.75em; margin:0; padding-left:14px;">
+        <li>1024 parallel rollouts</li>
+        <li>Elite sampling (top-k)</li>
+        <li>Gradient-free</li>
+      </ul>
+    </div>
+    
+    <!-- RTI-MPC -->
+    <div style="background:var(--energy-green-light); border-radius:8px; padding:10px; border-left:4px solid var(--energy-green);">
+      <div style="font-weight:700; color:var(--energy-green); font-size:0.85em; margin-bottom:6px;">RTI-MPC</div>
+      <ul style="font-size:0.75em; margin:0; padding-left:14px;">
+        <li>Linearize + solve QP</li>
+        <li>JAX Jacobians</li>
+        <li>Iterative refinement</li>
+      </ul>
+    </div>
+  </div>
+  
+  <div class="math-block" style="margin:8px 0; padding:8px;">
+    <div class="math-label">Power Consumption (Paper Eq. 15)</div>
+    $$\dot{W}_{\text{comp}} = \underbrace{\eta_{\text{vol}} \cdot V_{\text{sl}} \cdot \frac{\text{comp}\%}{100}}_{\text{volume flow } \dot{V}} \times \underbrace{\rho(P) \cdot (h_{\text{out}} - h_{\text{in}})}_{\text{power factor}(P_{\text{suc}})}$$
+  </div>
+  
+  <div class="highlight-box frost" style="margin:8px 0 0 0; padding:8px;">
+    <strong>Critical:</strong> All three methods use a shared <strong>hysteresis layer</strong> that translates continuous optimizer outputs to discrete valve (0/1) and compressor (0/50/100%) actuation. Without this layer, pure optimization fails on this hybrid system.
+  </div>
+</div>
+
+<!-- ROW 4: Results -->
+<div class="card span-2 accent-green">
+  <div class="section-kicker">7 - Results</div>
+  <h2>Controller Comparison (4-Hour Cycle)</h2>
+  
+  <p style="margin-bottom:8px;">All three MPC methods with hysteresis layer <strong>outperform PID</strong> on both temperature and pressure constraints. Day/night transition at t=2h.</p>
+  
+  <div class="diagram-container" style="padding:10px;">
+    <div class="diagram-title">Controller Trajectory Comparison: All MPC Methods Satisfy Constraints</div>
+    <img src="controller_comparison.png" alt="Controller Comparison" style="width:100%; max-width:100%; border-radius:6px; border:1px solid #E8F4F8;"/>
+    <div class="diagram-caption"><strong>Top:</strong> T<sub>air</sub> ∈ [2,5]°C. All MPC methods (colored) stay within the green band; PID (gray) undershoots to -2°C. <strong>Middle:</strong> P<sub>suc</sub> ≤ P<sub>ref</sub>. MPC methods track the limit; PID violates at night. <strong>Bottom:</strong> Power consumption with on/off cycling.</div>
+  </div>
+  
+  <div class="metrics-row" style="margin-top:10px;">
+    <div class="metric highlight">
+      <div class="metric-value" style="color:var(--warm-orange);">✓</div>
+      <div class="metric-label">T<sub>air</sub> (All MPC)</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value" style="color:var(--danger-red);">✗</div>
+      <div class="metric-label">T<sub>air</sub> (PID)</div>
+    </div>
+    <div class="metric highlight">
+      <div class="metric-value">✓</div>
+      <div class="metric-label">P<sub>suc</sub> (All MPC)</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value" style="color:var(--danger-red);">✗</div>
+      <div class="metric-label">P<sub>suc</sub> (PID)</div>
+    </div>
+  </div>
+</div>
+
+<div class="card span-2 accent-orange">
+  <div class="section-kicker">8 - Analysis</div>
+  <h2>Key Insight: Hysteresis Layer for Hybrid Systems</h2>
+  
+  <p style="margin-bottom:8px;"><strong>Hysteresis</strong> means using <em>different thresholds</em> for turning ON vs OFF. Like a thermostat: heat ON at 18°C, OFF at 22°C. This "dead band" prevents rapid on/off chattering.</p>
+  
+  <!-- Hysteresis Diagram -->
+  <div class="diagram-container" style="padding:10px; margin:8px 0;">
+    <div class="diagram-title">Hysteresis Control: Different Thresholds for ON vs OFF</div>
+    <svg viewBox="0 0 700 140" xmlns="http://www.w3.org/2000/svg">
+      <!-- Temperature Hysteresis -->
+      <g transform="translate(20, 10)">
+        <text x="130" y="12" text-anchor="middle" font-size="11" fill="#4A5568" font-weight="700">VALVE HYSTERESIS (Temperature)</text>
+        
+        <!-- Y-axis -->
+        <line x1="40" y1="30" x2="40" y2="110" stroke="#A0AEC0" stroke-width="1"/>
+        <text x="35" y="45" text-anchor="end" font-size="8" fill="#A0AEC0">5°C</text>
+        <text x="35" y="70" text-anchor="end" font-size="8" fill="#A0AEC0">3.5°C</text>
+        <text x="35" y="95" text-anchor="end" font-size="8" fill="#A0AEC0">2°C</text>
+        
+        <!-- Constraint band -->
+        <rect x="40" y="35" width="220" height="60" fill="#45B69C" opacity="0.15"/>
+        <text x="260" y="68" font-size="7" fill="#45B69C">Constraint: 2-5°C</text>
+        
+        <!-- Hysteresis thresholds -->
+        <line x1="40" y1="50" x2="260" y2="50" stroke="#E8734A" stroke-width="2" stroke-dasharray="5,3"/>
+        <text x="265" y="53" font-size="8" fill="#E8734A" font-weight="600">4.5°C → OPEN valves</text>
+        
+        <line x1="40" y1="75" x2="260" y2="75" stroke="#4AA8C2" stroke-width="2" stroke-dasharray="5,3"/>
+        <text x="265" y="78" font-size="8" fill="#4AA8C2" font-weight="600">3.5°C → CLOSE valves</text>
+        
+        <!-- Dead band annotation -->
+        <rect x="130" y="50" width="30" height="25" fill="#6B5B95" opacity="0.2" stroke="#6B5B95" stroke-width="1"/>
+        <text x="145" y="66" text-anchor="middle" font-size="7" fill="#6B5B95" font-weight="600">Dead</text>
+        <text x="145" y="74" text-anchor="middle" font-size="7" fill="#6B5B95" font-weight="600">Band</text>
+        
+        <!-- Example trajectory -->
+        <path d="M 50 90 Q 80 50 110 45 Q 140 60 170 75 Q 200 90 230 55 Q 250 40 250 50" fill="none" stroke="#4A5568" stroke-width="1.5"/>
+        <text x="150" y="108" text-anchor="middle" font-size="7" fill="#4A5568" font-style="italic">T_air oscillates in dead band</text>
+      </g>
+      
+      <!-- Pressure Hysteresis -->
+      <g transform="translate(380, 10)">
+        <text x="130" y="12" text-anchor="middle" font-size="11" fill="#4A5568" font-weight="700">COMPRESSOR HYSTERESIS (Pressure)</text>
+        
+        <!-- Y-axis -->
+        <line x1="40" y1="30" x2="40" y2="110" stroke="#A0AEC0" stroke-width="1"/>
+        <text x="35" y="40" text-anchor="end" font-size="8" fill="#A0AEC0">1.7 bar</text>
+        <text x="35" y="60" text-anchor="end" font-size="8" fill="#A0AEC0">P<tspan dy="2" font-size="6">ref</tspan></text>
+        <text x="35" y="85" text-anchor="end" font-size="8" fill="#A0AEC0">P<tspan dy="2" font-size="6">ref</tspan>-0.3</text>
+        
+        <!-- Constraint region -->
+        <rect x="40" y="30" width="220" height="35" fill="#E53E3E" opacity="0.1"/>
+        <text x="260" y="48" font-size="7" fill="#E53E3E">Violation zone</text>
+        
+        <!-- Hysteresis thresholds -->
+        <line x1="40" y1="55" x2="260" y2="55" stroke="#E8734A" stroke-width="2" stroke-dasharray="5,3"/>
+        <text x="265" y="58" font-size="8" fill="#E8734A" font-weight="600">P<tspan dy="1" font-size="6">ref</tspan><tspan dy="-1"> → Compressor ON</tspan></text>
+        
+        <line x1="40" y1="80" x2="260" y2="80" stroke="#4AA8C2" stroke-width="2" stroke-dasharray="5,3"/>
+        <text x="265" y="83" font-size="8" fill="#4AA8C2" font-weight="600">P<tspan dy="1" font-size="6">ref</tspan><tspan dy="-1">-0.3 → Comp OFF</tspan></text>
+        
+        <!-- Dead band annotation -->
+        <rect x="130" y="55" width="30" height="25" fill="#6B5B95" opacity="0.2" stroke="#6B5B95" stroke-width="1"/>
+        <text x="145" y="71" text-anchor="middle" font-size="7" fill="#6B5B95" font-weight="600">Dead</text>
+        <text x="145" y="79" text-anchor="middle" font-size="7" fill="#6B5B95" font-weight="600">Band</text>
+        
+        <!-- Example trajectory -->
+        <path d="M 50 70 Q 80 85 110 80 Q 140 55 170 50 Q 200 65 230 85 Q 250 70 250 65" fill="none" stroke="#4A5568" stroke-width="1.5"/>
+        <text x="150" y="108" text-anchor="middle" font-size="7" fill="#4A5568" font-style="italic">P_suc cycles in dead band</text>
+      </g>
+    </svg>
+    <div class="diagram-caption"><strong>Hysteresis prevents chattering:</strong> Without dead bands, the system would rapidly switch ON/OFF at a single threshold, causing wear and instability. The gap between ON and OFF thresholds ensures stable cycling.</div>
+  </div>
+  
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:8px;">
+    <div style="background:var(--warm-orange-light); padding:10px; border-radius:6px; border-left:4px solid var(--warm-orange);">
+      <div style="font-weight:700; color:var(--warm-orange); font-size:0.9em; margin-bottom:4px;">WITHOUT HYSTERESIS</div>
+      <ul style="font-size:0.78em; margin:0; padding-left:16px;">
+        <li>Optimizer outputs smooth values (e.g., 0.3)</li>
+        <li>Discretized inconsistently to 0 or 1</li>
+        <li>Rapid chattering at threshold</li>
+        <li><strong>Result:</strong> Constraints violated</li>
+      </ul>
+    </div>
+    <div style="background:var(--energy-green-light); padding:10px; border-radius:6px; border-left:4px solid var(--energy-green);">
+      <div style="font-weight:700; color:var(--energy-green); font-size:0.9em; margin-bottom:4px;">WITH HYSTERESIS</div>
+      <ul style="font-size:0.78em; margin:0; padding-left:16px;">
+        <li>State-based switching (not optimizer output)</li>
+        <li>Dead band absorbs noise/uncertainty</li>
+        <li>Proper bang-bang cycling like PID</li>
+        <li><strong>Result:</strong> All constraints satisfied</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+</div><!-- end content-grid -->
+
+<footer>
+  <div class="footer-brand">
+    <div>
+      <div class="logo-text">Mila - Quebec AI Institute</div>
+      <div class="tagline">Hysteresis layer is essential for hybrid MPC | All methods (MPPI, MS-SLSQP, RTI-MPC) outperform PID baseline</div>
+    </div>
+    <div class="footer-ref">
+      <span class="footer-ref-label">Reference</span>
+      <span class="footer-ref-text">Larsen et al. (2007) - Supermarket Refrigeration System – Benchmark for Hybrid System Control. European Control Conference.</span>
+    </div>
+  </div>
+  <div class="tech-stack">
+    <span class="tech-item">Python 3.13</span>
+    <span class="tech-item">JAX</span>
+    <span class="tech-item">SciPy SLSQP</span>
+    <span class="tech-item">MPPI</span>
+    <span class="tech-item">RTI-MPC</span>
+    <span class="tech-item" style="background:var(--frost-pale); color:var(--frost-blue);"><a href="controller_comparison.png" style="color:inherit; text-decoration:none;">📊 Full Results Plot</a></span>
+  </div>
+</footer>
+
+</div><!-- end poster -->
+
+<script>
+  document.addEventListener("DOMContentLoaded", function() {
+    renderMathInElement(document.body, {
+      delimiters: [
+        {left: "$$", right: "$$", display: true},
+        {left: "$", right: "$", display: false}
+      ],
+      throwOnError: false
+    });
+  });
+</script>
+</body>
+</html>
+
