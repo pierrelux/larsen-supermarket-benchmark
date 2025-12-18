@@ -150,13 +150,15 @@ class DisplayCase:
 
 class TraditionalController:
     """PID controller with valve hysteresis (from benchmark paper)"""
-    def __init__(self, control_params: ControlParams, n_cases: int, comp_capacities: List[float]):
+    def __init__(self, control_params: ControlParams, n_cases: int, comp_capacities: List[float],
+                 has_vfd: bool = False):
         self.cp = control_params
         self.n_cases = n_cases
         self.comp_capacities = comp_capacities
         self.integral = 0.0
         self.valve_states = [0] * n_cases
         self.prev_comp_on = [0.0] * len(comp_capacities)
+        self.has_vfd = has_vfd  # True if first compressor has Variable Frequency Drive
         
     def valve_control(self, T_air, case_idx):
         """Hysteresis controller for inlet valve"""
@@ -177,6 +179,29 @@ class TraditionalController:
         
         # Quantize to available compressor capacities
         comp_on = [0.0] * len(self.comp_capacities)
+        
+        # For VFD scenario (3d-3c): comp1 is continuous [10,40], others are discrete
+        if self.has_vfd:
+            if u_PI <= 0:
+                pass  # All off
+            elif u_PI < 10:
+                comp_on[0] = 10  # Hold at minimum
+            elif u_PI < self.comp_capacities[0]:
+                comp_on[0] = u_PI  # Continuous control
+            else:
+                comp_on[0] = self.comp_capacities[0]  # VFD at max
+                # Add discrete units with midpoint thresholds
+                cumsum = self.comp_capacities[0]
+                for i in range(1, len(self.comp_capacities)):
+                    threshold = cumsum + self.comp_capacities[i] / 2.0
+                    if u_PI >= threshold:
+                        comp_on[i] = self.comp_capacities[i]
+                        cumsum += self.comp_capacities[i]
+                    else:
+                        break
+            return comp_on
+        
+        # Standard discrete quantization (2d-2c scenario)
         cumsum = 0
         for i in range(len(self.comp_capacities)):
             threshold = cumsum + self.comp_capacities[i] / 2.0
@@ -198,7 +223,8 @@ class RefrigerationSystem:
         self.V_sl = V_sl
         self.eta_vol = 0.81
         self.comp_capacities = comp_capacities
-        self.controller = TraditionalController(ControlParams(), n_cases, comp_capacities)
+        self.has_vfd = has_vfd
+        self.controller = TraditionalController(ControlParams(), n_cases, comp_capacities, has_vfd=has_vfd)
         
         # Scenario parameters
         self.Q_airload = 3000.0
@@ -254,8 +280,13 @@ class RefrigerationSystem:
             for i in range(len(self.comp_capacities)):
                 prev_on = self.controller.prev_comp_on[i] > 0.1
                 curr_on = new_comp_on[i] > 0.1
-                if prev_on != curr_on:
-                    comp_switches += 1
+                # For VFD: only count 0↔on transitions, not adjustments within [10,40]
+                if self.has_vfd and i == 0:
+                    if prev_on != curr_on:
+                        comp_switches += 1
+                else:
+                    if prev_on != curr_on:
+                        comp_switches += 1
             
             self.controller.prev_comp_on = new_comp_on[:]
             self.current_comp_on = new_comp_on
@@ -471,7 +502,7 @@ def run_scenario(scenario='2d-2c', duration=14400, dt=1.0, seed=None):
     """Run PID baseline simulation
     
     Args:
-        scenario: '2d-2c' (2 cases, 2 compressors)
+        scenario: '2d-2c' (2 cases, 2 compressors) or '3d-3c' (3 cases, 3 compressors with VFD)
         duration: Simulation duration [s]
         dt: Time step [s]
         seed: Random seed
@@ -486,15 +517,26 @@ def run_scenario(scenario='2d-2c', duration=14400, dt=1.0, seed=None):
         n_cases = 2
         comp_capacities = [50.0, 50.0]
         V_sl = 0.08
+        has_vfd = False
+    elif scenario == '3d-3c':
+        n_cases = 3
+        comp_capacities = [40.0, 30.0, 30.0]  # comp1 is VFD: continuous [10,40]
+        V_sl = 0.095
+        has_vfd = True
     else:
-        raise ValueError("Only 2d-2c scenario supported")
+        raise ValueError(f"Unknown scenario: {scenario}. Use '2d-2c' or '3d-3c'")
     
     # Initialize system
-    system = RefrigerationSystem(n_cases, comp_capacities, V_sl, has_vfd=False)
+    system = RefrigerationSystem(n_cases, comp_capacities, V_sl, has_vfd=has_vfd)
     
     # Set initial conditions per paper Appendix C
-    system.cases[0].state = np.array([2.0, 0.0, 5.1, 0.0])
-    system.cases[1].state = np.array([2.0, 0.0, 0.0, 1.0])
+    if scenario == '2d-2c':
+        system.cases[0].state = np.array([2.0, 0.0, 5.1, 0.0])
+        system.cases[1].state = np.array([2.0, 0.0, 0.0, 1.0])
+    else:  # 3d-3c
+        system.cases[0].state = np.array([2.0, 0.0, 5.1, 0.0])
+        system.cases[1].state = np.array([2.0, 0.0, 0.0, 1.0])
+        system.cases[2].state = np.array([2.0, 0.0, 2.5, 0.5])
     system.P_suc = 1.40
     
     # Storage for results
